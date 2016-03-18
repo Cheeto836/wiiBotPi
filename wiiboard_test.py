@@ -2,19 +2,15 @@
 
 #A majority of this code was taken from InitialState's beerfridge project.
 #to find that go to https://github.com/InitialState/beerfridge/wiki
-#changed made by myself will be marked with a #<changed> at the 
-#beginning of the changed code block and a #</changed> at the end
-#of the changed code block
 
 import collections
 import time
 import bluetooth
 import sys
 import subprocess
-import os
 
 # --------- User Settings ---------
-WEIGHT_SAMPLES = 500
+WEIGHT_SAMPLES = 10
 # ---------------------------------
 
 # Wiiboard Parameters
@@ -37,8 +33,6 @@ BLUETOOTH_NAME = "Nintendo RVL-WBC-01"
 
 class EventProcessor:
     def __init__(self):
-        self._measured = False
-        self.done = False
         self._measureCnt = 0
         self._events = range(WEIGHT_SAMPLES)
 
@@ -53,16 +47,6 @@ class EventProcessor:
                 self._weight = self._sum/WEIGHT_SAMPLES
                 self._measureCnt = 0
                 print str(self._weight) + " lbs"
-            if not self._measured:
-                self._measured = True
-
-    @property
-    def weight(self):
-        if not self._events:
-            return 0
-        histogram = collections.Counter(round(num, 1) for num in self._events)
-        return histogram.most_common(1)[0][0]
-
 
 class BoardEvent:
     def __init__(self, topLeft, topRight, bottomLeft, bottomRight, buttonPressed, buttonReleased):
@@ -79,6 +63,12 @@ class BoardEvent:
 class Wiiboard:
     def __init__(self, processor):
         # Sockets and status
+        #<changed>
+        self.mTopLeft = 0
+        self.mTopRight = 0
+        self.mBottomLeft = 0
+        self.mBottomRight = 0
+        #</changed>
         self.receivesocket = None
         self.controlsocket = None
 
@@ -125,7 +115,15 @@ class Wiiboard:
             print "Could not connect to Wiiboard at address " + address
 
     def receive(self):
-        while self.status == "Connected" and not self.processor.done:
+        while self.status == "Connected":
+            #<changed>
+            #all data processing should be done here
+            sys.stderr.write("\x1b[2J\x1b[H")
+            print "topLeft:     " + str(self.mTopLeft)
+            print "topRight:    " + str(self.mTopRight)
+            print "bottomLeft:  " + str(self.mBottomLeft)
+            print "bottomRight: " + str(self.mBottomRight)
+            #</changed>
             data = self.receivesocket.recv(25)
             intype = int(data.encode("hex")[2:4])
             if intype == INPUT_STATUS:
@@ -199,6 +197,12 @@ class Wiiboard:
         topRight = self.calcMass(rawTR, TOP_RIGHT)
         bottomLeft = self.calcMass(rawBL, BOTTOM_LEFT)
         bottomRight = self.calcMass(rawBR, BOTTOM_RIGHT)
+        #<changed>
+        self.mTopLeft = topLeft;
+        self.mTopRight = topRight;
+        self.mBottomLeft = bottomLeft;
+        self.mBottomRight = bottomRight;
+        #</changed>
         boardEvent = BoardEvent(topLeft, topRight, bottomLeft, bottomRight, buttonPressed, buttonReleased)
         return boardEvent
 
@@ -297,7 +301,7 @@ def main():
     # Flash the LED so we know we can step on.
     board.setLight(False)
     board.wait(500)
-    board.setLight(False)
+    board.setLight(True)
     board.receive()
 
 if __name__ == "__main__":
