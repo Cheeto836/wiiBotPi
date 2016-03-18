@@ -31,48 +31,18 @@ BOTTOM_LEFT = 3
 BLUETOOTH_NAME = "Nintendo RVL-WBC-01"
 
 
-class EventProcessor:
-    def __init__(self):
-        self._measureCnt = 0
-        self._events = range(WEIGHT_SAMPLES)
-
-    def mass(self, event):
-        if (event.totalWeight > 2):
-            self._events[self._measureCnt] = event.totalWeight*2.20462
-            self._measureCnt += 1
-            if self._measureCnt == WEIGHT_SAMPLES:
-                self._sum = 0
-                for x in range(0, WEIGHT_SAMPLES-1):
-                    self._sum += self._events[x]
-                self._weight = self._sum/WEIGHT_SAMPLES
-                self._measureCnt = 0
-                print str(self._weight) + " lbs"
-
-class BoardEvent:
-    def __init__(self, topLeft, topRight, bottomLeft, bottomRight, buttonPressed, buttonReleased):
-
-        self.topLeft = topLeft
-        self.topRight = topRight
-        self.bottomLeft = bottomLeft
-        self.bottomRight = bottomRight
-        self.buttonPressed = buttonPressed
-        self.buttonReleased = buttonReleased
-        #convenience value
-        self.totalWeight = topLeft + topRight + bottomLeft + bottomRight
-
 class Wiiboard:
-    def __init__(self, processor):
+    def __init__(self):
         # Sockets and status
         #<changed>
-        self.mTopLeft = 0
-        self.mTopRight = 0
-        self.mBottomLeft = 0
-        self.mBottomRight = 0
+        self.TopLeft = 0
+        self.TopRight = 0
+        self.BottomLeft = 0
+        self.BottomRight = 0
         #</changed>
         self.receivesocket = None
         self.controlsocket = None
 
-        self.processor = processor
         self.calibration = []
         self.calibrationRequested = False
         self.LED = False
@@ -84,8 +54,6 @@ class Wiiboard:
                 self.calibration[i].append(10000)  # high dummy value so events with it don't register
 
         self.status = "Disconnected"
-        self.lastEvent = BoardEvent(0, 0, 0, 0, False, False)
-
         try:
             self.receivesocket = bluetooth.BluetoothSocket(bluetooth.L2CAP)
             self.controlsocket = bluetooth.BluetoothSocket(bluetooth.L2CAP)
@@ -115,14 +83,14 @@ class Wiiboard:
             print "Could not connect to Wiiboard at address " + address
 
     def receive(self):
-        while self.status == "Connected":
+        if self.status == "Connected":
             #<changed>
             #all data processing should be done here
             sys.stderr.write("\x1b[2J\x1b[H")
-            print "topLeft:     " + str(self.mTopLeft)
-            print "topRight:    " + str(self.mTopRight)
-            print "bottomLeft:  " + str(self.mBottomLeft)
-            print "bottomRight: " + str(self.mBottomRight)
+            print "topLeft:     " + str(self.TopLeft)
+            print "topRight:    " + str(self.TopRight)
+            print "bottomLeft:  " + str(self.BottomLeft)
+            print "bottomRight: " + str(self.BottomRight)
             #</changed>
             data = self.receivesocket.recv(25)
             intype = int(data.encode("hex")[2:4])
@@ -137,7 +105,7 @@ class Wiiboard:
                     if packetLength < 16:
                         self.calibrationRequested = False
             elif intype == EXTENSION_8BYTES:
-                self.processor.mass(self.createBoardEvent(data[2:12]))
+                self.readBoardData(data[2:12])
             else:
                 print "ACK to data write received"
 
@@ -169,7 +137,7 @@ class Wiiboard:
             print "No Wiiboards discovered."
         return address
 
-    def createBoardEvent(self, bytes):
+    def readBoardData(self, bytes):
         buttonBytes = bytes[0:2]
         bytes = bytes[2:12]
         buttonPressed = False
@@ -182,29 +150,17 @@ class Wiiboard:
                 print "Button pressed"
                 self.buttonDown = True
 
-        if not buttonPressed:
-            if self.lastEvent.buttonPressed:
-                buttonReleased = True
-                self.buttonDown = False
-                print "Button released"
+        #if not buttonPressed:
 
         rawTR = (int(bytes[0].encode("hex"), 16) << 8) + int(bytes[1].encode("hex"), 16)
         rawBR = (int(bytes[2].encode("hex"), 16) << 8) + int(bytes[3].encode("hex"), 16)
         rawTL = (int(bytes[4].encode("hex"), 16) << 8) + int(bytes[5].encode("hex"), 16)
         rawBL = (int(bytes[6].encode("hex"), 16) << 8) + int(bytes[7].encode("hex"), 16)
 
-        topLeft = self.calcMass(rawTL, TOP_LEFT)
-        topRight = self.calcMass(rawTR, TOP_RIGHT)
-        bottomLeft = self.calcMass(rawBL, BOTTOM_LEFT)
-        bottomRight = self.calcMass(rawBR, BOTTOM_RIGHT)
-        #<changed>
-        self.mTopLeft = topLeft;
-        self.mTopRight = topRight;
-        self.mBottomLeft = bottomLeft;
-        self.mBottomRight = bottomRight;
-        #</changed>
-        boardEvent = BoardEvent(topLeft, topRight, bottomLeft, bottomRight, buttonPressed, buttonReleased)
-        return boardEvent
+        self.TopLeft = self.calcMass(rawTL, TOP_LEFT)
+        self.TopRight = self.calcMass(rawTR, TOP_RIGHT)
+        self.BottomLeft = self.calcMass(rawBL, BOTTOM_LEFT)
+        self.BottomRight = self.calcMass(rawBR, BOTTOM_RIGHT)
 
     def calcMass(self, raw, pos):
         val = 0.0
@@ -219,9 +175,6 @@ class Wiiboard:
             val = 17 + 17 * ((raw - self.calibration[1][pos]) / float((self.calibration[2][pos] - self.calibration[1][pos])))
 
         return val
-
-    def getEvent(self):
-        return self.lastEvent
 
     def getLED(self):
         return self.LED
@@ -278,9 +231,7 @@ class Wiiboard:
 
 
 def main():
-    processor = EventProcessor()
-
-    board = Wiiboard(processor)
+    board = Wiiboard()
     if len(sys.argv) == 1:
         print "Discovering board..."
         address = board.discover()
@@ -302,7 +253,12 @@ def main():
     board.setLight(False)
     board.wait(500)
     board.setLight(True)
-    board.receive()
+    try:
+        while 1:
+            board.receive()
+    except KeyboardInterrupt:
+        #gpio cleanup here
+        print "finished"
 
 if __name__ == "__main__":
     main()
