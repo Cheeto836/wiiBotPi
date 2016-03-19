@@ -298,8 +298,12 @@ def main():
         pass
 
     print "Trying to connect..."
-    board.connect(address)  # The wii board must be in sync mode at this time
-    board.wait(200)
+    while not board.isConnected():
+        if address == None:
+            address = board.discover()
+        else:
+            board.connect(address) #wii board must be in sync mode at this point
+            board.wait(200)
     # Flash the LED so we know we can step on.
     board.setLight(False)
     board.wait(500)
