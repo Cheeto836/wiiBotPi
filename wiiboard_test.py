@@ -8,6 +8,7 @@ import time
 import bluetooth
 import sys
 import subprocess
+import RPi.GPIO as gpio
 
 # --------- User Settings ---------
 WEIGHT_SAMPLES = 10
@@ -17,7 +18,6 @@ WEIGHT_SAMPLES = 10
 CONTINUOUS_REPORTING = "04"  # Easier as string with leading zero
 COMMAND_LIGHT = 11
 COMMAND_REPORTING = 12
-COMMAND_REQUEST_STATUS = 15
 COMMAND_REGISTER = 16
 COMMAND_READ_REGISTER = 17
 INPUT_STATUS = 20
@@ -30,6 +30,25 @@ TOP_LEFT = 2
 BOTTOM_LEFT = 3
 BLUETOOTH_NAME = "Nintendo RVL-WBC-01"
 
+#pwm pins for bot
+leftMotorPin = 18
+rightMotorPin = 23
+
+#current duty cycles for forward, backward, and off
+forwardCycle = 80
+backwardCycle = 30
+neutralCycle = 0
+
+#init gpio ad broadcom mode
+gpio.setmode(gpio.BCM)
+#setup pins
+gpio.setup(rightMotorPin, gpio.OUT)
+gpio.setup(leftMotorPin, gpio.OUT)
+rightPwm = gpio.PWM(rightMotorPin, 400)
+leftPwm = gpio.PWM(leftMotorPin, 400)
+#init state
+rightPwm.start(0)
+leftPwm.start(0)
 
 class Wiiboard:
     def __init__(self):
@@ -84,14 +103,6 @@ class Wiiboard:
 
     def receive(self):
         if self.status == "Connected":
-            #<changed>
-            #all data processing should be done here
-            sys.stderr.write("\x1b[2J\x1b[H")
-            print "topLeft:     " + str(self.TopLeft)
-            print "topRight:    " + str(self.TopRight)
-            print "bottomLeft:  " + str(self.BottomLeft)
-            print "bottomRight: " + str(self.BottomRight)
-            #</changed>
             data = self.receivesocket.recv(25)
             intype = int(data.encode("hex")[2:4])
             if intype == INPUT_STATUS:
@@ -229,6 +240,46 @@ class Wiiboard:
     def wait(self, millis):
         time.sleep(millis / 1000.0)
 
+def getGraph(val, maxVal):
+    toPrint = ""
+    percent = val / maxVal * 100
+    for i in range(0, int(percent)):
+        toPrint += "."
+    return toPrint
+
+def getPower(top, bottom, deadzone):
+    maxVal = 80.0
+    diff = top - bottom
+    if abs(diff) <= deadzone:
+        return 0
+    else:
+        percent = abs(diff / maxVal)
+        motorVal = 10.0 * percent
+        if diff < 0:
+            motorVal = motorVal * -1
+    return motorVal
+
+def drive(throttle, steer):
+    if steer > 0:
+        #turn right
+        rightPwm.ChangeDutyCycle(backwardCycle);
+        leftPwm.ChangeDutyCycle(forwardCycle);
+    elif steer < 0:
+        #turn left
+        rightPwm.ChangeDutyCycle(forwardCycle);
+        leftPwm.ChangeDutyCycle(backwardCycle);
+    elif throttle > 0:
+        #forward
+        rightPwm.ChangeDutyCycle(forwardCycle);
+        leftPwm.ChangeDutyCycle(forwardCycle);
+    elif throttle < 0:
+        #backward
+        rightPwm.ChangeDutyCycle(backwardCycle);
+        leftPwm.ChangeDutyCycle(backwardCycle);
+    else:
+        #no movement
+        rightPwm.ChangeDutyCycle(neutralCycle);
+        leftPwm.ChangeDutyCycle(neutralCycle);
 
 def main():
     board = Wiiboard()
@@ -253,11 +304,38 @@ def main():
     board.setLight(False)
     board.wait(500)
     board.setLight(True)
+
     try:
         while 1:
             board.receive()
+            sys.stderr.write("\x1b[2J\x1b[H")
+            print "topLeft:     " + str(board.TopLeft)
+            print "topRight:    " + str(board.TopRight)
+            print "bottomLeft:  " + str(board.BottomLeft)
+            print "bottomRight: " + str(board.BottomRight)
+            top = (board.TopLeft + board.TopRight) / 2
+            bottom = (board.BottomLeft + board.BottomRight) / 2
+            right = (board.TopRight + board.BottomRight) / 2
+            left = (board.TopLeft + board.BottomLeft) / 2
+            throttle = getPower(top, bottom, 20)
+            steer = getPower(left, right, 20)
+            #steer is given priority for now because its harder to do without
+            #messing with throttle
+            if steer > 0:
+                drive(0, 1)
+            elif steer < 0:
+                drive(0, -1)
+            elif throttle > 0:
+                drive(1, 0)
+            elif throttle < 0:
+                drive(-1, 0)
+            else:
+                drive(0, 0)
     except KeyboardInterrupt:
         #gpio cleanup here
+        rightPwm.stop()
+        leftPwm.stop()
+        gpio.cleanup()
         print "finished"
 
 if __name__ == "__main__":
